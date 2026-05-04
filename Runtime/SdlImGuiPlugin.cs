@@ -34,6 +34,10 @@ public sealed class SdlImGuiPlugin : IPlugin
         io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard | ImGuiConfigFlags.NavEnableGamepad;
         ImGui.StyleColorsDark();
 
+        // Vulkan render-graph adapter for ImGui. The plugin is a no-op when the graphics
+        // backend is not Vulkan, so it's safe to add unconditionally.
+        app.AddPlugin(new VulkanImGuiPlugin());
+
         var sdlWindow = app.World.Resource<AppWindow>().Sdl;
         io.DisplaySize = new Vector2(Math.Max(1, sdlWindow.Width), Math.Max(1, sdlWindow.Height));
         io.DeltaTime = 1f / 60f;
