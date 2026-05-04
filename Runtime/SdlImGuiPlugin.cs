@@ -34,9 +34,11 @@ public sealed class SdlImGuiPlugin : IPlugin
         io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard | ImGuiConfigFlags.NavEnableGamepad;
         ImGui.StyleColorsDark();
 
-        // Vulkan render-graph adapter for ImGui. The plugin is a no-op when the graphics
-        // backend is not Vulkan, so it's safe to add unconditionally.
+        // ImGui's Vulkan adapter. No-op when the graphics backend isn't Vulkan.
         app.AddPlugin(new VulkanImGuiPlugin());
+
+        var cfg = app.World.Resource<Config>();
+        bool isVulkan = cfg.Graphics == GraphicsBackend.Vulkan;
 
         var sdlWindow = app.World.Resource<AppWindow>().Sdl;
         io.DisplaySize = new Vector2(Math.Max(1, sdlWindow.Width), Math.Max(1, sdlWindow.Height));
@@ -44,7 +46,7 @@ public sealed class SdlImGuiPlugin : IPlugin
 
         logger.Info($"ImGui initialized - display size: {sdlWindow.Width}x{sdlWindow.Height}");
 
-        if (sdlWindow.Renderer != IntPtr.Zero)
+        if (!isVulkan)
         {
             logger.Info("ImGui using SDL software renderer backend.");
             var renderer = new SdlImGuiRenderer(sdlWindow.Renderer);
@@ -52,8 +54,8 @@ public sealed class SdlImGuiPlugin : IPlugin
         }
         else
         {
-            // Vulkan mode: no SDL renderer, but ImGui still needs the font atlas built.
-            // Don't clear tex data - the Vulkan ImGui render node will upload it to GPU.
+            // Vulkan mode: build the font atlas but keep CPU pixels - the Vulkan ImGui
+            // render node uploads them to the GPU.
             logger.Info("ImGui using Vulkan mode - building font atlas only (no SDL renderer).");
             var io2 = ImGui.GetIO();
             io2.Fonts.GetTexDataAsRGBA32(out IntPtr _, out int _, out int _, out _);
@@ -73,8 +75,8 @@ public sealed class SdlImGuiPlugin : IPlugin
                     ? (float)world.Resource<Time>().DeltaSeconds
                     : 1f / 60f;
             
-                // Set framebuffer scale for Vulkan mode (SDL renderer path sets this in NewFrame)
-                if (appWindow.Sdl.Renderer == IntPtr.Zero)
+                // Set framebuffer scale for Vulkan mode (SDL renderer sets it in NewFrame).
+                if (isVulkan)
                 {
                     SDL.GetWindowSizeInPixels(appWindow.Sdl.Window, out int pxW, out int pxH);
                     if (w > 0 && h > 0)
@@ -96,13 +98,12 @@ public sealed class SdlImGuiPlugin : IPlugin
 
         app.AddSystem(Stage.Render, new SystemDescriptor(world =>
             {
-                var sdl = world.Resource<AppWindow>().Sdl;
-                if (sdl.Renderer == IntPtr.Zero)
-                {
-                    // Vulkan mode: still need to end the ImGui frame.
-                    ImGui.Render();
+                // Vulkan mode: ImGuiRenderNode (Stage.Last) closes the frame; doing it
+                // here would race Stage.Render systems still calling ImGui.Begin/End.
+                if (isVulkan)
                     return;
-                }
+
+                var sdl = world.Resource<AppWindow>().Sdl;
                 var imGuiRenderer = world.Resource<SdlImGuiRenderer>();
                 var clear = world.Resource<ClearColor>();
             
